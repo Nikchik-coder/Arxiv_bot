@@ -1,0 +1,4 @@
+python-telegram-bot>=20.0
+arxiv>=1.4.0
+python-dotenv>=1.0.0
+typing-extensions>=4.0.0

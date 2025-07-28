@@ -7,6 +7,9 @@ config/.env
 !example.env # Keep example env file if needed
 !logging_config.py
 
+database/user_subscriptions.json
+database/notified_articles.json
+
 voice.ipynb
 voice.py
 postgres.ipynb

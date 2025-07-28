@@ -1,4 +1,5 @@
-python-telegram-bot>=20.0
-arxiv>=1.4.0
-python-dotenv>=1.0.0
-typing-extensions>=4.0.0
+python-telegram-bot[job-queue]==21.0.1
+arxiv==2.1.0
+python-dotenv==1.0.1
+tzdata==2024.1
+numpy==1.26.4

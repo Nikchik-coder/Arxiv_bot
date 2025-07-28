@@ -5,7 +5,7 @@ import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
-# Add project root to path for module access
+# Add project root to path for module access    
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.arxiv_search import search_arxiv, get_popular_categories, validate_category
@@ -102,12 +102,21 @@ Use `/test <topic>` to preview what papers you'd get.
 async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cats = get_popular_categories()
     query = update.callback_query
+    user_id = str(update.effective_user.id)
     
+    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
+    user_topics = subscriptions.get(user_id, [])
+
     keyboard = []
     for cat_code, description in cats.items():
+        is_subscribed = cat_code in user_topics
+        
+        button_text = f"{'✅ ' if is_subscribed else ''}{description} ({cat_code})"
+        action = "unsub_cat" if is_subscribed else "sub_cat"
+        
         button = InlineKeyboardButton(
-            f"{description} ({cat_code})", 
-            callback_data=f"sub:{cat_code}"
+            button_text, 
+            callback_data=f"{action}:{cat_code}"
         )
         keyboard.append([button])
     
@@ -115,7 +124,7 @@ async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.message.edit_text(
-        "📋 **Click a category to subscribe:**", 
+        "📋 **Click a category to subscribe or unsubscribe:**", 
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -168,6 +177,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await mysubscriptions(update, context)
     elif command == 'help':
         await help_command(update, context)
+    elif command == 'sub_cat':
+        topic = args[0]
+        await subscribe_handler(update, context, topic, from_categories=True)
+    elif command == 'unsub_cat':
+        topic = args[0]
+        await unsubscribe_handler(update, context, topic, from_categories=True)
     elif command == 'sub':
         topic = args[0]
         await subscribe_handler(update, context, topic)
@@ -175,7 +190,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         topic = args[0]
         await unsubscribe_handler(update, context, topic)
 
-async def subscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str):
+async def subscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str, from_categories: bool = False):
     """Handles category subscription from a button press."""
     user_id = str(update.effective_user.id)
     
@@ -188,12 +203,18 @@ async def subscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         save_data(subscriptions, Config.USER_SUBSCRIPTIONS_FILE)
         
         # After subscribing, show the updated subscriptions list
-        await mysubscriptions(update, context)
+        if from_categories:
+            await categories(update, context)
+        else:
+            await mysubscriptions(update, context)
     else:
         # If already subscribed, just show the subscriptions list
-        await mysubscriptions(update, context)
+        if from_categories:
+            await categories(update, context)
+        else:
+            await mysubscriptions(update, context)
 
-async def unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str):
+async def unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str, from_categories: bool = False):
     """Handles category unsubscription from a button press."""
     query = update.callback_query
     user_id = str(update.effective_user.id)
@@ -208,7 +229,10 @@ async def unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer(text=f"✅ Unsubscribed from {topic}")
         
         # After unsubscribing, refresh the list
-        await mysubscriptions(update, context)
+        if from_categories:
+            await categories(update, context)
+        else:
+            await mysubscriptions(update, context)
     else:
         await query.answer(text=f"You are no longer subscribed to {topic}")
 
@@ -356,19 +380,15 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
             for article in articles:
                 article_id = article['id']
                 
-                # Create a unique key for this article-topic combination
-                notification_key = f"{topic}:{article_id}"
-                
-                if notification_key not in notified_articles.get('sent', []):
-                    logger.info(f"New article found for topic '{topic}': {article['title'][:50]}...")
-                    
-                    message = f"🔔 **New arXiv Paper Alert!**\n\n"
-                    message += f"📍 **Topic:** {topic}\n\n"
-                    message += format_article_message(article)
+                message = f"🔔 **New arXiv Paper Alert!**\n\n"
+                message += f"📍 **Topic:** {topic}\n\n"
+                message += format_article_message(article)
 
-                    # Send to all users subscribed to this topic
-                    for user_id, user_topics in subscriptions.items():
-                        if topic in user_topics:
+                # Send to all users subscribed to this topic who haven't seen this article
+                for user_id, user_topics in subscriptions.items():
+                    if topic in user_topics:
+                        # Check if user has already been notified for this article
+                        if article_id not in notified_articles.get(user_id, []):
                             try:
                                 await context.bot.send_message(
                                     chat_id=user_id, 
@@ -376,21 +396,23 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
                                     parse_mode='Markdown',
                                     disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
                                 )
-                                logger.info(f"Notification sent to user {user_id}")
+                                logger.info(f"Notification for article {article_id} sent to user {user_id}")
+                                
+                                # Mark as notified for this user
+                                if user_id not in notified_articles:
+                                    notified_articles[user_id] = []
+                                notified_articles[user_id].append(article_id)
+                                
                             except Exception as e:
                                 logger.error(f"Failed to send message to {user_id}: {e}")
-
-                    # Mark as notified
-                    if 'sent' not in notified_articles:
-                        notified_articles['sent'] = []
-                    notified_articles['sent'].append(notification_key)
                     
         except Exception as e:
             logger.error(f"Error checking topic '{topic}': {e}")
 
-    # Clean up old notifications
-    if 'sent' in notified_articles and len(notified_articles['sent']) > Config.MAX_NOTIFICATION_HISTORY:
-        notified_articles['sent'] = notified_articles['sent'][-Config.MAX_NOTIFICATION_HISTORY:]
+    # Clean up old notifications for each user
+    for user_id in notified_articles:
+        if len(notified_articles[user_id]) > Config.MAX_NOTIFICATION_HISTORY:
+            notified_articles[user_id] = notified_articles[user_id][-Config.MAX_NOTIFICATION_HISTORY:]
     
     save_data(notified_articles, context.job.data['notified_articles_file'])
     logger.info("Finished checking for new articles")

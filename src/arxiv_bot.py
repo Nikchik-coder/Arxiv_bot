@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import json
 import os
 import sys
@@ -11,11 +12,52 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.arxiv_search import search_arxiv, get_popular_categories, validate_category
 from config.config import Config
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# --- Constants ---
+LOG_FILE = "logs/arxiv_bot.log"
+
+# --- Logging Setup ---
+def setup_logging():
+    """Configures logging to file and console, filtering out verbose libraries."""
+    # Create logs directory if it doesn't exist
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+
+    # Define a filter to exclude INFO-level logs from specific noisy loggers
+    class InfoFilter(logging.Filter):
+        def filter(self, record):
+            # Exclude INFO logs from httpx and telegram.ext.Application
+            if record.levelno == logging.INFO and record.name.startswith(('httpx', 'telegram.ext.Application', 'apscheduler', 'arxiv')):
+                return False
+            return True
+
+    # Configure the root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            # File handler with rotation
+            RotatingFileHandler(
+                LOG_FILE, 
+                maxBytes=5 * 1024 * 1024,  # 5 MB
+                backupCount=2
+            ),
+            # Console handler
+            logging.StreamHandler()
+        ]
+    )
+
+    # Get the root logger
+    root_logger = logging.getLogger()
+    
+    # Add the filter to all handlers
+    for handler in root_logger.handlers:
+        handler.addFilter(InfoFilter())
+
+    logger = logging.getLogger(__name__)
+    return logger
+
+# Initialize logging
+logger = setup_logging()
+
 
 def load_data(filename):
     try:
@@ -398,7 +440,7 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
                                     parse_mode='Markdown',
                                     disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
                                 )
-                                logger.info(f"Notification for article {article_id} sent to user {user_id}")
+                                logger.info(f"Notification for article {article_id} sent to user {user_id} for topic '{topic}'")
                                 
                                 newly_notified_articles.add(article_id)
 
@@ -409,6 +451,8 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 
                             except Exception as e:
                                 logger.error(f"Failed to send message to {user_id}: {e}")
+                        else:
+                            logger.info(f"Skipping article {article_id} for user {user_id} (already notified)")
                     
         except Exception as e:
             logger.error(f"Error checking topic '{topic}': {e}")

@@ -1,17 +1,17 @@
-# 🔬 arXiv Notification Bot
+# arXiv Notification Bot
 
 A powerful Telegram bot that sends you notifications when new research papers are published on arXiv based on your interests. Stay updated with the latest research in your field with a user-friendly, button-driven interface.
 
-## ✨ Features
+## Features
 
-- 📋 **Flexible Subscriptions**: Subscribe to both keywords and official arXiv categories.
-- 🔔 **Real-time Notifications**: Get notified when new papers match your interests.
-- 🤖 **Interactive Buttons**: Easily manage subscriptions and browse categories with a full button-based interface.
-- 🏷️ **Category Support**: Subscribe to a wide range of official arXiv categories like `cs.AI`, `cs.LG`, `cond-mat`, etc.
-- 🔍 **Smart Search**: Keyword search across titles and abstracts.
-- ⚙️ **Configurable**: Customize check intervals, message formatting, and more.
+- **Flexible Subscriptions**: Subscribe to both keywords and official arXiv categories.
+- **Real-time Notifications**: Get notified when new papers match your interests.
+- **Interactive Buttons**: Easily manage subscriptions and browse categories with a full button-based interface.
+- **Category Support**: Subscribe to a wide range of official arXiv categories like `cs.AI`, `cs.LG`, `cond-mat`, etc.
+- **Smart Search**: Keyword search across titles and abstracts.
+- **Configurable**: Customize check intervals, message formatting, and more.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -42,20 +42,65 @@ A powerful Telegram bot that sends you notifications when new research papers ar
    python src/arxiv_bot.py
    ```
 
-## 🤖 Bot Interface
+## Deploying on a Server
+
+When deploying the bot on a Linux server (e.g., Ubuntu), follow these steps to ensure a smooth setup.
+
+### 1. Install Virtual Environment Tools (If Needed)
+
+On some systems, you may need to install the package for creating virtual environments first.
+```bash
+sudo apt update
+sudo apt install python3.12-venv
+```
+
+### 2. Create and Activate Virtual Environment
+
+Navigate to your project directory and create a virtual environment.
+```bash
+cd /path/to/your/project
+python3 -m venv venv
+source venv/bin/activate
+```
+Your command prompt should change to indicate that you are now operating within the virtual environment.
+
+### 3. Install Dependencies
+
+With the virtual environment activated, install the required packages. The `requirements.txt` file is configured to install `python-telegram-bot` with `job-queue` support, which is essential for the scheduled notification job to run.
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Run the Bot
+
+You can now run the bot:
+```bash
+python src/arxiv_bot.py
+```
+
+### Troubleshooting
+
+- **`AttributeError: 'NoneType' object has no attribute 'run_repeating'`**: This error means that `python-telegram-bot` was installed without `job-queue` support. Ensure you have activated your virtual environment and have installed the packages from the updated `requirements.txt` file.
+
+- **Deactivating the Environment**: When you are done, you can deactivate the virtual environment with a simple command:
+  ```bash
+  deactivate
+  ```
+
+## Bot Interface
 
 The bot is designed to be fully interactive, with buttons guiding you through all its features.
 
 | Button | Action |
 |---|---|
-| 📚 **Browse Categories** | Shows a list of popular arXiv categories to subscribe to with a single click. |
-| 📋 **My Subscriptions** | View and manage your current subscriptions. Each subscription has an "Unsubscribe" button. |
-| ❓ **Help** | Displays a help message with instructions on how to use the bot. |
-| ⬅️ **Back to Main Menu** | Available in all sub-menus to easily navigate back. |
+| **Browse Categories** | Shows a list of popular arXiv categories to subscribe to with a single click. |
+| **My Subscriptions** | View and manage your current subscriptions. Each subscription has an "Unsubscribe" button. |
+| **Help** | Displays a help message with instructions on how to use the bot. |
+| **Back to Main Menu** | Available in all sub-menus to easily navigate back. |
 
 You can also use traditional commands like `/subscribe <keyword>` to subscribe to custom topics.
 
-## 📂 File Structure
+## File Structure
 
 The project is organized into the following directories:
 
@@ -75,7 +120,7 @@ arxiv_bot/
 └── README.md
 ```
 
-## 🔧 How It Works
+## How It Works
 
 The bot's functionality is split into two main parts: handling user interactions and periodically checking for new papers.
 
@@ -97,7 +142,7 @@ The bot's functionality is split into two main parts: handling user interactions
   - **Notification Delivery**: For each topic, it performs a search and, if new papers are found, it sends a notification to every user subscribed to that topic.
   - **Duplicate Prevention**: To avoid sending the same notification multiple times, the bot keeps a record of every paper it sends in `database/notified_articles.json`.
 
-## ⚙️ Configuration
+## Configuration
 
 Customize the bot's behavior by creating a `.env` file in the `config/` directory. See `config/.example.env` for all available options.
 
@@ -111,10 +156,10 @@ Customize the bot's behavior by creating a `.env` file in the `config/` director
 - `MAX_ABSTRACT_LENGTH`
 - ...and more.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! If you have ideas for new features or improvements, feel free to open an issue or submit a pull request.
 
-## 📄 License
+## License
 
 This project is open source. Feel free to use, modify, and distribute it. 

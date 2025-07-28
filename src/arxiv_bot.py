@@ -369,6 +369,8 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
     all_topics = set(topic for user_topics in subscriptions.values() for topic in user_topics)
     logger.info(f"Checking {len(all_topics)} unique topics")
 
+    newly_notified_articles = set()
+
     for topic in all_topics:
         try:
             articles = search_arxiv(
@@ -398,6 +400,8 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 )
                                 logger.info(f"Notification for article {article_id} sent to user {user_id}")
                                 
+                                newly_notified_articles.add(article_id)
+
                                 # Mark as notified for this user
                                 if user_id not in notified_articles:
                                     notified_articles[user_id] = []
@@ -408,6 +412,9 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
                     
         except Exception as e:
             logger.error(f"Error checking topic '{topic}': {e}")
+
+    if newly_notified_articles:
+        logger.info(f"Found and notified users about {len(newly_notified_articles)} new articles.")
 
     # Clean up old notifications for each user
     for user_id in notified_articles:

@@ -1,0 +1,50 @@
+.DS_Store
+
+# Environment variables
+config/.env
+.env
+.env.*
+!example.env # Keep example env file if needed
+!logging_config.py
+
+voice.ipynb
+voice.py
+postgres.ipynb
+help.txt
+cartesia.py
+script_arxiv.py
+code_fetcher.py
+code_output.json
+
+# Logs
+logs/
+*.log
+logs/*.log
+
+# Python specific
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+.venv/  # Another common name
+
+# IDE / Editor Settings
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS generated files
+.DS_Store # macOS
+Thumbs.db # Windows
+ehthumbs.db # Windows
+
+# Downloaded videos
+video/downloaded_videos/
+
+music/songs/

@@ -124,28 +124,30 @@ async def show_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = """
-📚 *How to use this bot:*
+*How to Use the Bot*
 
-*Keyword Subscriptions:*
-Subscribe to any topic using keywords: `/subscribe machine learning`
+This bot helps you stay updated with new arXiv papers\. Use the interactive buttons for most actions\.
 
-*Category Subscriptions:*
-Subscribe to official arXiv categories: `/subscribe cs\.AI`
+*Main Menu*
+Press the `MENU` button at any time to access the main features:
+• *Browse Categories*: Subscribe to popular arXiv categories with a single click\.
+• *My Subscriptions*: View and manage all your current subscriptions \(both keywords and categories\)\.
 
-*Popular Categories:*
-• `cs.AI` \- Artificial Intelligence
-• `cs.LG` \- Machine Learning
-• `cond-mat` \- Condensed Matter
-• `econ.EM` \- Econometrics
-• `stat.ML` \- Statistics \- Machine Learning
+*Subscribing*
+You can subscribe in two ways:
 
-Use `/categories` to see all popular categories\.
-Use `/test <topic>` to preview what papers you'd get\.
+1\. *By Category*: Use the "Browse Categories" button to see a list of official arXiv categories\.
+2\. *By Keyword*: Use the command `/subscribe <your keyword>`\. For example:
+    • `/subscribe quantum computing`
+    • `/subscribe gravitational waves`
 
-*Tips:*
-• You can subscribe to multiple topics
-• Mix keywords and categories 
-• Check `/mysubscriptions` to manage your subscriptions
+*Testing Your Subscriptions*
+Want to see what kind of papers a subscription will give you? Use the `/test` command:
+• `/test cs.AI`
+• `/test machine learning`
+
+*Managing Subscriptions*
+Go to "My Subscriptions" from the main menu to see all your topics\. You can unsubscribe from any of them with a single click\. You can also use the `/unsubscribe <topic>` command\.
     """
     
     keyboard = [[InlineKeyboardButton("⬅️ Back to Main Menu", callback_data='main_menu')]]

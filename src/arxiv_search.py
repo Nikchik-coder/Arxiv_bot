@@ -34,8 +34,17 @@ def search_arxiv(topic: str, max_results: int, minutes_back: Optional[int] = Non
     if validate_category(topic):
         query = f"cat:{topic}"
     else:
-        # It's a keyword search across title and abstract
-        query = f'ti:"{topic}" OR abs:"{topic}"'
+        # For keyword searches, look for all keywords in the title OR abstract
+        keywords = topic.split()
+        
+        # Search for all keywords in the title
+        title_query = " AND ".join([f'ti:"{kw}"' for kw in keywords])
+        
+        # Search for all keywords in the abstract
+        abstract_query = " AND ".join([f'abs:"{kw}"' for kw in keywords])
+        
+        # Combine with OR
+        query = f"({title_query}) OR ({abstract_query})"
     
     try:
         search = arxiv.Search(

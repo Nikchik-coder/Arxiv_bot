@@ -3,8 +3,10 @@ from logging.handlers import RotatingFileHandler
 import json
 import os
 import sys
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+)
 
 # Add project root to path for module access    
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -24,7 +26,7 @@ def setup_logging():
     # Define a filter to exclude INFO-level logs from specific noisy loggers
     class InfoFilter(logging.Filter):
         def filter(self, record):
-            # Exclude INFO logs from httpx and telegram.ext.Application
+            # Exclude INFO logs from httpx, telegram's application, apscheduler, and arxiv
             if record.levelno == logging.INFO and record.name.startswith(('httpx', 'telegram.ext.Application', 'apscheduler', 'arxiv')):
                 return False
             return True
@@ -74,10 +76,11 @@ WELCOME_MESSAGE = """
 🔬 **Welcome to the arXiv Notifier Bot!**
 
 I help you stay updated with the latest research papers on arXiv.
+Click the **MENU** button below to get started.
 """
 
 def get_main_menu_keyboard():
-    """Returns the main menu keyboard."""
+    """Returns the main menu inline keyboard."""
     keyboard = [
         [
             InlineKeyboardButton("📚 Browse Categories", callback_data='browse_categories'),
@@ -89,19 +92,32 @@ def get_main_menu_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def get_persistent_keyboard():
+    """Returns the persistent keyboard with a MENU button."""
+    keyboard = [[KeyboardButton("MENU")]]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends the welcome message and main menu."""
+    """Sends the welcome message and persistent menu."""
     await update.message.reply_text(
         WELCOME_MESSAGE,
+        reply_markup=get_persistent_keyboard(),
+        parse_mode='Markdown'
+    )
+
+async def show_main_menu_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends a new message with the main menu."""
+    await update.message.reply_text(
+        "**Main Menu**\n\nHow can I help you?",
         reply_markup=get_main_menu_keyboard(),
         parse_mode='Markdown'
     )
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows the main menu by editing the current message."""
     query = update.callback_query
     await query.message.edit_text(
-        WELCOME_MESSAGE,
+        "**Main Menu**\n\nHow can I help you?",
         reply_markup=get_main_menu_keyboard(),
         parse_mode='Markdown'
     )
@@ -212,7 +228,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     command, *args = query.data.split(':', 1)
     
     if command == 'main_menu':
-        await show_main_menu(update, context)
+        await show_main_menu_callback(update, context)
     elif command == 'browse_categories':
         await categories(update, context)
     elif command == 'my_subscriptions':
@@ -292,7 +308,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not subscriptions[user_id]:
             del subscriptions[user_id]
         save_data(subscriptions, Config.USER_SUBSCRIPTIONS_FILE)
-        await update.message.reply_text(f"❌ Unsubscribed from **{topic}**.", parse_mode='Markdown')
+        await update.message.reply_text(f"🗑️ Unsubscribed from **{topic}**.", parse_mode='Markdown')
     else:
         await update.message.reply_text(f"You are not subscribed to **{topic}**.", parse_mode='Markdown')
 
@@ -311,7 +327,7 @@ async def mysubscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         keyboard = []
         for topic in user_topics:
             topic_type = "📁 Category" if validate_category(topic) else "🔍 Keyword"
-            button_text = f"❌ Unsubscribe from {topic_type}: {topic}"
+            button_text = f"🗑️ Unsubscribe: {topic}"
             keyboard.append([
                 InlineKeyboardButton(button_text, callback_data=f"unsub:{topic}")
             ])
@@ -412,6 +428,7 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Checking {len(all_topics)} unique topics")
 
     newly_notified_articles = set()
+    popular_categories = get_popular_categories()
 
     for topic in all_topics:
         try:
@@ -424,8 +441,9 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
             for article in articles:
                 article_id = article['id']
                 
+                display_topic = popular_categories.get(topic, topic)
                 message = f"🔔 **New arXiv Paper Alert!**\n\n"
-                message += f"📍 **Topic:** {topic}\n\n"
+                message += f"📍 **Topic:** {display_topic}\n\n"
                 message += format_article_message(article)
 
                 # Send to all users subscribed to this topic who haven't seen this article
@@ -478,6 +496,9 @@ def main() -> None:
     """Start the bot."""
     initialize_paths()
     
+    # Override the check interval to 1 minute
+    Config.CHECK_INTERVAL_MINUTES = 1
+    
     try:
         Config.validate()
     except ValueError as e:
@@ -495,8 +516,9 @@ def main() -> None:
     application.add_handler(CommandHandler("categories", categories))
     application.add_handler(CommandHandler("test", test_search))
 
-    # Add button handler
+    # Add button handler and menu handler
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.Regex('^MENU$'), show_main_menu_message))
 
     # Schedule the job to check for new articles
     job_queue = application.job_queue

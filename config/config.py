@@ -15,8 +15,9 @@ class Config:
     NOTIFIED_ARTICLES_FILE = os.getenv("NOTIFIED_ARTICLES_FILE", "notified_articles.json")
     
     # ArXiv Search Settings
-    MAX_RESULTS_PER_SEARCH = int(os.getenv("MAX_RESULTS_PER_SEARCH", "10"))
+    MAX_RESULTS_PER_SEARCH = int(os.getenv("MAX_RESULTS_PER_SEARCH", "100"))
     DAYS_BACK_FOR_NEW_ARTICLES = int(os.getenv("DAYS_BACK_FOR_NEW_ARTICLES", "1"))
+    SEARCH_BUFFER_MINUTES = int(os.getenv("SEARCH_BUFFER_MINUTES", "5")) # Look back N extra minutes
     DAYS_BACK_FOR_TEST_SEARCH = int(os.getenv("DAYS_BACK_FOR_TEST_SEARCH", "7"))
     MAX_TEST_RESULTS = int(os.getenv("MAX_TEST_RESULTS", "3"))
     

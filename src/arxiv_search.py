@@ -9,21 +9,27 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.config import Config
 
-def search_arxiv(topic: str, max_results: int = 10, days_back: int = 1) -> List[Dict]:
+def search_arxiv(topic: str, max_results: int, minutes_back: Optional[int] = None, days_back: Optional[int] = None) -> List[Dict]:
     """
     Search arXiv for articles on a given topic or category.
     
     Args:
         topic: Search query or arXiv category (e.g., "cs.AI", "machine learning")
         max_results: Maximum number of results to return
-        days_back: Only return articles from the last N days
+        minutes_back: Only return articles from the last N minutes (preferred)
+        days_back: Only return articles from the last N days (fallback)
         
     Returns:
         List of dictionaries containing article information
     """
-    # Calculate the date threshold for "new" articles
-    date_threshold = datetime.datetime.now() - datetime.timedelta(days=days_back)
-    
+    if minutes_back:
+        date_threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes_back)
+    elif days_back:
+        date_threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days_back)
+    else:
+        # Default to a safe fallback if neither is provided
+        date_threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+
     # Check if the topic is an arXiv category
     if validate_category(topic):
         query = f"cat:{topic}"
@@ -34,15 +40,18 @@ def search_arxiv(topic: str, max_results: int = 10, days_back: int = 1) -> List[
     try:
         search = arxiv.Search(
             query=query,
-            max_results=max_results * 2,  # Get more results to filter by date
+            max_results=max_results,
             sort_by=arxiv.SortCriterion.SubmittedDate,
             sort_order=arxiv.SortOrder.Descending
         )
         
         results = []
         for result in search.results():
+            # Ensure the result 'published' datetime is timezone-aware (UTC)
+            published_time = result.published.replace(tzinfo=datetime.timezone.utc)
+            
             # Only include articles submitted within the date threshold
-            if result.published.replace(tzinfo=None) >= date_threshold:
+            if published_time >= date_threshold:
                 results.append({
                     'id': result.get_short_id(),
                     'title': result.title.strip(),
@@ -53,10 +62,9 @@ def search_arxiv(topic: str, max_results: int = 10, days_back: int = 1) -> List[
                     'categories': result.categories,
                     'primary_category': result.primary_category
                 })
-                
-                # Stop when we have enough recent results
-                if len(results) >= max_results:
-                    break
+            else:
+                # Since results are sorted by date, we can stop once we pass the threshold
+                break
         
         return results
     

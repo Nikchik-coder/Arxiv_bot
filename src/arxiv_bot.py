@@ -391,6 +391,10 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
     all_topics = set(topic for user_topics in subscriptions.values() for topic in user_topics)
     logger.info(f"Checking {len(all_topics)} unique topics")
 
+    # Determine the time window for the search
+    # Add a buffer to avoid missing articles due to timing
+    search_window_minutes = Config.CHECK_INTERVAL_MINUTES + Config.SEARCH_BUFFER_MINUTES
+    
     newly_notified_articles = set()
     popular_categories = get_popular_categories()
 
@@ -399,7 +403,7 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
             articles = search_arxiv(
                 topic, 
                 max_results=Config.MAX_RESULTS_PER_SEARCH, 
-                days_back=Config.DAYS_BACK_FOR_NEW_ARTICLES
+                minutes_back=search_window_minutes
             )
             
             for article in articles:
@@ -447,9 +451,6 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     """Start the bot."""
     initialize_database()
-    
-    # Override the check interval to 1 minute
-    Config.CHECK_INTERVAL_MINUTES = 1
     
     try:
         Config.validate()

@@ -7,12 +7,19 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Keyboar
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 )
+from telegram.constants import ParseMode
+import re
 
 # Add project root to path for module access    
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.arxiv_search import search_arxiv, get_popular_categories, validate_category
 from config.config import Config
+from database.database import (
+    initialize_database, add_subscription, remove_subscription, 
+    get_user_subscriptions, get_all_subscriptions,
+    has_been_notified, add_notified_article, clean_old_notifications
+)
 
 # --- Constants ---
 LOG_FILE = "logs/arxiv_bot.log"
@@ -60,23 +67,16 @@ def setup_logging():
 # Initialize logging
 logger = setup_logging()
 
-
-def load_data(filename):
-    try:
-        with open(filename, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def save_data(data, filename):
-    with open(filename, 'w') as f:
-        json.dump(data, f, indent=4)
+def escape_markdown_v2(text: str) -> str:
+    """Escapes characters for Telegram's MarkdownV2 parse mode."""
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 WELCOME_MESSAGE = """
-🔬 **Welcome to the arXiv Notifier Bot!**
+🔬 *Welcome to the arXiv Notifier Bot\!*
 
-I help you stay updated with the latest research papers on arXiv.
-Click the **MENU** button below to get started.
+I help you stay updated with the latest research papers on arXiv\.
+Click the *MENU* button below to get started\.
 """
 
 def get_main_menu_keyboard():
@@ -102,47 +102,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         WELCOME_MESSAGE,
         reply_markup=get_persistent_keyboard(),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2
     )
 
 async def show_main_menu_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a new message with the main menu."""
     await update.message.reply_text(
-        "**Main Menu**\n\nHow can I help you?",
+        "*Main Menu*\n\nHow can I help you\?",
         reply_markup=get_main_menu_keyboard(),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2
     )
 
 async def show_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows the main menu by editing the current message."""
     query = update.callback_query
     await query.message.edit_text(
-        "**Main Menu**\n\nHow can I help you?",
+        "*Main Menu*\n\nHow can I help you\?",
         reply_markup=get_main_menu_keyboard(),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = """
-📚 **How to use this bot:**
+📚 *How to use this bot:*
 
-**Keyword Subscriptions:**
+*Keyword Subscriptions:*
 Subscribe to any topic using keywords: `/subscribe machine learning`
 
-**Category Subscriptions:**
-Subscribe to official arXiv categories: `/subscribe cs.AI`
+*Category Subscriptions:*
+Subscribe to official arXiv categories: `/subscribe cs\.AI`
 
-**Popular Categories:**
-• `cs.AI` - Artificial Intelligence
-• `cs.LG` - Machine Learning
-• `cond-mat` - Condensed Matter
-• `econ.EM` - Econometrics
-• `stat.ML` - Statistics - Machine Learning
+*Popular Categories:*
+• `cs.AI` \- Artificial Intelligence
+• `cs.LG` \- Machine Learning
+• `cond-mat` \- Condensed Matter
+• `econ.EM` \- Econometrics
+• `stat.ML` \- Statistics \- Machine Learning
 
-Use `/categories` to see all popular categories.
-Use `/test <topic>` to preview what papers you'd get.
+Use `/categories` to see all popular categories\.
+Use `/test <topic>` to preview what papers you'd get\.
 
-**Tips:**
+*Tips:*
 • You can subscribe to multiple topics
 • Mix keywords and categories 
 • Check `/mysubscriptions` to manage your subscriptions
@@ -153,17 +153,16 @@ Use `/test <topic>` to preview what papers you'd get.
 
     # Check if the command was triggered by a button press
     if update.callback_query:
-        await update.callback_query.message.edit_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.callback_query.message.edit_text(help_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
     else:
-        await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cats = get_popular_categories()
     query = update.callback_query
-    user_id = str(update.effective_user.id)
+    user_id = update.effective_user.id
     
-    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
-    user_topics = subscriptions.get(user_id, [])
+    user_topics = get_user_subscriptions(user_id)
 
     keyboard = []
     for cat_code, description in cats.items():
@@ -182,43 +181,40 @@ async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.message.edit_text(
-        "📋 **Click a category to subscribe or unsubscribe:**", 
+        "📋 *Click a category to subscribe or unsubscribe:*", 
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2
     )
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.message.from_user.id)
+    user_id = update.message.from_user.id
     topic = ' '.join(context.args).strip()
     
     if not topic:
         await update.message.reply_text(
-            "Please provide a topic to subscribe to.\n\n"
+            "Please provide a topic to subscribe to\.\n\n"
             "Examples:\n"
             "• `/subscribe machine learning`\n"
-            "• `/subscribe cs.AI`\n"
-            "• `/subscribe natural language processing`"
+            "• `/subscribe cs\.AI`\n"
+            "• `/subscribe natural language processing`",
+            parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
-    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
-    if user_id not in subscriptions:
-        subscriptions[user_id] = []
+    user_topics = get_user_subscriptions(user_id)
     
-    if topic not in subscriptions[user_id]:
-        subscriptions[user_id].append(topic)
-        save_data(subscriptions, Config.USER_SUBSCRIPTIONS_FILE)
+    if topic not in user_topics:
+        add_subscription(user_id, topic)
         
-        # Determine if it's a category or keyword
         topic_type = "category" if validate_category(topic) else "keyword"
         await update.message.reply_text(
-            f"✅ Successfully subscribed to {topic_type}: **{topic}**\n\n"
-            f"You'll receive notifications when new papers are published!\n"
-            f"Use `/test {topic}` to see what papers you'd get.",
-            parse_mode='Markdown'
+            f"✅ Successfully subscribed to {topic_type}: *{escape_markdown_v2(topic)}*\n\n"
+            f"You'll receive notifications when new papers are published\!\n"
+            f"Use `/test {escape_markdown_v2(topic)}` to see what papers you'd get\.",
+            parse_mode=ParseMode.MARKDOWN_V2
         )
     else:
-        await update.message.reply_text(f"You are already subscribed to **{topic}**.", parse_mode='Markdown')
+        await update.message.reply_text(f"You are already subscribed to *{escape_markdown_v2(topic)}*\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button presses."""
@@ -250,83 +246,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def subscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str, from_categories: bool = False):
     """Handles category subscription from a button press."""
-    user_id = str(update.effective_user.id)
+    user_id = update.effective_user.id
     
-    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
-    if user_id not in subscriptions:
-        subscriptions[user_id] = []
+    user_topics = get_user_subscriptions(user_id)
     
-    if topic not in subscriptions[user_id]:
-        subscriptions[user_id].append(topic)
-        save_data(subscriptions, Config.USER_SUBSCRIPTIONS_FILE)
+    if topic not in user_topics:
+        add_subscription(user_id, topic)
         
-        # After subscribing, show the updated subscriptions list
-        if from_categories:
-            await categories(update, context)
-        else:
-            await mysubscriptions(update, context)
+    if from_categories:
+        await categories(update, context)
     else:
-        # If already subscribed, just show the subscriptions list
-        if from_categories:
-            await categories(update, context)
-        else:
-            await mysubscriptions(update, context)
+        await mysubscriptions(update, context)
 
 async def unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str, from_categories: bool = False):
     """Handles category unsubscription from a button press."""
     query = update.callback_query
-    user_id = str(update.effective_user.id)
+    user_id = update.effective_user.id
     
-    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
-    if user_id in subscriptions and topic in subscriptions[user_id]:
-        subscriptions[user_id].remove(topic)
-        if not subscriptions[user_id]:
-            del subscriptions[user_id]
-        save_data(subscriptions, Config.USER_SUBSCRIPTIONS_FILE)
-        
-        await query.answer(text=f"✅ Unsubscribed from {topic}")
-        
-        # After unsubscribing, refresh the list
-        if from_categories:
-            await categories(update, context)
-        else:
-            await mysubscriptions(update, context)
+    remove_subscription(user_id, topic)
+    await query.answer(text=f"✅ Unsubscribed from {topic}")
+    
+    if from_categories:
+        await categories(update, context)
     else:
-        await query.answer(text=f"You are no longer subscribed to {topic}")
+        await mysubscriptions(update, context)
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.message.from_user.id)
+    user_id = update.message.from_user.id
     topic = ' '.join(context.args).strip()
     
     if not topic:
-        await update.message.reply_text("Please provide a topic to unsubscribe from.")
+        await update.message.reply_text("Please provide a topic to unsubscribe from\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
-    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
-    if user_id in subscriptions and topic in subscriptions[user_id]:
-        subscriptions[user_id].remove(topic)
-        if not subscriptions[user_id]:
-            del subscriptions[user_id]
-        save_data(subscriptions, Config.USER_SUBSCRIPTIONS_FILE)
-        await update.message.reply_text(f"🗑️ Unsubscribed from **{topic}**.", parse_mode='Markdown')
-    else:
-        await update.message.reply_text(f"You are not subscribed to **{topic}**.", parse_mode='Markdown')
+    remove_subscription(user_id, topic)
+    await update.message.reply_text(f"🗑️ Unsubscribed from *{escape_markdown_v2(topic)}*\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def mysubscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # This function can be called by a command or a button press,
-    # so we need to handle both `update.message` and `update.callback_query`
     query = update.callback_query
     message = query.message if query else update.message
-    user_id = str(update.effective_user.id)
+    user_id = update.effective_user.id
     
-    subscriptions = load_data(Config.USER_SUBSCRIPTIONS_FILE)
-    user_topics = subscriptions.get(user_id, [])
+    user_topics = get_user_subscriptions(user_id)
     
     if user_topics:
-        response = "📋 **Your Current Subscriptions:**\n"
+        response = "📋 *Your Current Subscriptions:*\n"
         keyboard = []
         for topic in user_topics:
-            topic_type = "📁 Category" if validate_category(topic) else "🔍 Keyword"
             button_text = f"🗑️ Unsubscribe: {topic}"
             keyboard.append([
                 InlineKeyboardButton(button_text, callback_data=f"unsub:{topic}")
@@ -334,22 +300,22 @@ async def mysubscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         keyboard.append([InlineKeyboardButton("⬅️ Back to Main Menu", callback_data='main_menu')])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.edit_text(response, reply_markup=reply_markup, parse_mode='Markdown')
+        await message.edit_text(response, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
     else:
         await message.edit_text(
-            "You have no active subscriptions.",
+            "You have no active subscriptions\.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Main Menu", callback_data='main_menu')]]),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2
         )
 
 async def test_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     topic = ' '.join(context.args).strip()
     
     if not topic:
-        await update.message.reply_text("Please provide a topic to test.\nExample: `/test machine learning`")
+        await update.message.reply_text("Please provide a topic to test\.\nExample: `/test machine learning`", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
-    await update.message.reply_text(f"🔍 Searching for recent papers on **{topic}**...", parse_mode='Markdown')
+    await update.message.reply_text(f"🔍 Searching for recent papers on *{escape_markdown_v2(topic)}*\.\.\.", parse_mode=ParseMode.MARKDOWN_V2)
     
     try:
         articles = search_arxiv(
@@ -360,56 +326,55 @@ async def test_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         if not articles:
             await update.message.reply_text(
-                f"No recent papers found for **{topic}** in the last {Config.DAYS_BACK_FOR_TEST_SEARCH} days.\n"
-                f"Try a different topic or check if it's a valid arXiv category.",
-                parse_mode='Markdown'
+                f"No recent papers found for *{escape_markdown_v2(topic)}* in the last {Config.DAYS_BACK_FOR_TEST_SEARCH} days\.\n"
+                f"Try a different topic or check if it's a valid arXiv category\.",
+                parse_mode=ParseMode.MARKDOWN_V2
             )
             return
         
-        response = f"📄 **Recent papers for '{topic}':**\n\n"
+        response = f"📄 *Recent papers for '{escape_markdown_v2(topic)}':*\n\n"
         for i, article in enumerate(articles, 1):
             response += format_article_message(article, i)
             response += "\n" + "─" * 50 + "\n\n"
         
         await update.message.reply_text(
             response, 
-            parse_mode='Markdown', 
+            parse_mode=ParseMode.MARKDOWN_V2, 
             disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
         )
         
     except Exception as e:
         logger.error(f"Error in test search: {e}")
-        await update.message.reply_text("Sorry, there was an error searching for papers. Please try again later.")
+        await update.message.reply_text("Sorry, there was an error searching for papers\. Please try again later\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 def format_article_message(article, number=None):
     """Format article information into a readable message."""
-    title = article['title']
+    title = escape_markdown_v2(article['title'])
     
-    # Format authors
     authors = ", ".join(article['authors'][:Config.MAX_AUTHORS_DISPLAY])
     if len(article['authors']) > Config.MAX_AUTHORS_DISPLAY:
         authors += f" et al. ({len(article['authors'])} authors)"
+    authors = escape_markdown_v2(authors)
     
-    # Truncate abstract intelligently
     abstract = article['summary']
     if len(abstract) > Config.MAX_ABSTRACT_LENGTH:
-        # Find a good break point near the limit
         break_point = abstract.rfind('. ', 0, Config.MAX_ABSTRACT_LENGTH)
-        if break_point > Config.MAX_ABSTRACT_LENGTH - 100:  # If we found a good break point
+        if break_point > Config.MAX_ABSTRACT_LENGTH - 100:
             abstract = abstract[:break_point + 1]
         else:
             abstract = abstract[:Config.MAX_ABSTRACT_LENGTH] + "..."
+    abstract = escape_markdown_v2(abstract)
     
     message = ""
     if number:
-        message += f"**{number}.** "
+        message += f"*{number}.* "
     
-    message += f"**{title}**\n\n"
-    message += f"👥 **Authors:** {authors}\n"
-    message += f"📅 **Published:** {article['published']}\n"
-    message += f"🏷️ **Category:** {article['primary_category']}\n\n"
-    message += f"📄 **Abstract:** {abstract}\n\n"
-    message += f"🔗 [**Read Paper**]({article['pdf_url']})"
+    message += f"*{title}*\n\n"
+    message += f"👥 *Authors:* {authors}\n"
+    message += f"📅 *Published:* {escape_markdown_v2(article['published'])}\n"
+    message += f"🏷️ *Category:* {escape_markdown_v2(article['primary_category'])}\n\n"
+    message += f"📄 *Abstract:* {abstract}\n\n"
+    message += f"🔗 [Read Paper]({article['pdf_url']})"
     
     return message
 
@@ -417,8 +382,7 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check for new articles and notify subscribed users."""
     logger.info("Checking for new articles...")
     
-    subscriptions = load_data(context.job.data['user_subscriptions_file'])
-    notified_articles = load_data(context.job.data['notified_articles_file'])
+    subscriptions = get_all_subscriptions()
     
     if not subscriptions:
         logger.info("No active subscriptions found")
@@ -441,31 +405,26 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
             for article in articles:
                 article_id = article['id']
                 
-                display_topic = popular_categories.get(topic, topic)
-                message = f"🔔 **New arXiv Paper Alert!**\n\n"
-                message += f"📍 **Topic:** {display_topic}\n\n"
+                display_topic = escape_markdown_v2(popular_categories.get(topic, topic))
+                message = f"🔔 *New arXiv Paper Alert\!*\n\n"
+                message += f"📍 *Topic:* {display_topic}\n\n"
                 message += format_article_message(article)
 
-                # Send to all users subscribed to this topic who haven't seen this article
-                for user_id, user_topics in subscriptions.items():
+                for user_id_str, user_topics in subscriptions.items():
+                    user_id = int(user_id_str)
                     if topic in user_topics:
-                        # Check if user has already been notified for this article
-                        if article_id not in notified_articles.get(user_id, []):
+                        if not has_been_notified(user_id, article_id):
                             try:
                                 await context.bot.send_message(
                                     chat_id=user_id, 
                                     text=message, 
-                                    parse_mode='Markdown',
+                                    parse_mode=ParseMode.MARKDOWN_V2,
                                     disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
                                 )
                                 logger.info(f"Notification for article {article_id} sent to user {user_id} for topic '{topic}'")
                                 
                                 newly_notified_articles.add(article_id)
-
-                                # Mark as notified for this user
-                                if user_id not in notified_articles:
-                                    notified_articles[user_id] = []
-                                notified_articles[user_id].append(article_id)
+                                add_notified_article(user_id, article_id)
                                 
                             except Exception as e:
                                 logger.error(f"Failed to send message to {user_id}: {e}")
@@ -478,23 +437,16 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
     if newly_notified_articles:
         logger.info(f"Found and notified users about {len(newly_notified_articles)} new articles.")
 
-    # Clean up old notifications for each user
-    for user_id in notified_articles:
-        if len(notified_articles[user_id]) > Config.MAX_NOTIFICATION_HISTORY:
-            notified_articles[user_id] = notified_articles[user_id][-Config.MAX_NOTIFICATION_HISTORY:]
+    all_user_ids = subscriptions.keys()
+    for user_id_str in all_user_ids:
+        user_id = int(user_id_str)
+        clean_old_notifications(user_id, Config.MAX_NOTIFICATION_HISTORY)
     
-    save_data(notified_articles, context.job.data['notified_articles_file'])
     logger.info("Finished checking for new articles")
-
-def initialize_paths():
-    """Initializes and sets the absolute paths for data files."""
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    Config.USER_SUBSCRIPTIONS_FILE = os.path.join(base_dir, 'database', 'user_subscriptions.json')
-    Config.NOTIFIED_ARTICLES_FILE = os.path.join(base_dir, 'database', 'notified_articles.json')
 
 def main() -> None:
     """Start the bot."""
-    initialize_paths()
+    initialize_database()
     
     # Override the check interval to 1 minute
     Config.CHECK_INTERVAL_MINUTES = 1
@@ -522,15 +474,10 @@ def main() -> None:
 
     # Schedule the job to check for new articles
     job_queue = application.job_queue
-    job_context = {
-        'user_subscriptions_file': Config.USER_SUBSCRIPTIONS_FILE,
-        'notified_articles_file': Config.NOTIFIED_ARTICLES_FILE
-    }
     job_queue.run_repeating(
         check_new_articles, 
         interval=Config.get_check_interval_seconds(), 
-        first=10,
-        data=job_context
+        first=10
     )
 
     logger.info(f"Bot starting... Will check for new articles every {Config.CHECK_INTERVAL_MINUTES} minutes")

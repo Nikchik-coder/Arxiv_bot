@@ -10,6 +10,8 @@ config/.env
 database/user_subscriptions.json
 database/notified_articles.json
 
+database/arxiv_bot.db
+
 voice.ipynb
 voice.py
 postgres.ipynb

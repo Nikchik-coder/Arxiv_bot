@@ -18,6 +18,7 @@ class Config:
     MAX_RESULTS_PER_SEARCH = int(os.getenv("MAX_RESULTS_PER_SEARCH", "100"))
     DAYS_BACK_FOR_NEW_ARTICLES = int(os.getenv("DAYS_BACK_FOR_NEW_ARTICLES", "1"))
     SEARCH_BUFFER_MINUTES = int(os.getenv("SEARCH_BUFFER_MINUTES", "5")) # Look back N extra minutes
+    MINIMUM_SEARCH_WINDOW_MINUTES = int(os.getenv("MINIMUM_SEARCH_WINDOW_MINUTES", "10")) # Ensures the bot always looks back at least this many minutes
     DAYS_BACK_FOR_TEST_SEARCH = int(os.getenv("DAYS_BACK_FOR_TEST_SEARCH", "7"))
     MAX_TEST_RESULTS = int(os.getenv("MAX_TEST_RESULTS", "3"))
     

@@ -355,7 +355,10 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
         
     logger.info(f"Checking {len(all_topics)} unique topics concurrently...")
 
-    search_window_minutes = Config.CHECK_INTERVAL_MINUTES + Config.SEARCH_BUFFER_MINUTES
+    search_window_minutes = max(
+        Config.CHECK_INTERVAL_MINUTES + Config.SEARCH_BUFFER_MINUTES,
+        Config.MINIMUM_SEARCH_WINDOW_MINUTES
+    )
     
     # Create a list of tasks to run concurrently
     tasks = [

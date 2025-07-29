@@ -3,6 +3,8 @@ from logging.handlers import RotatingFileHandler
 import json
 import os
 import sys
+import asyncio
+import functools
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -141,13 +143,8 @@ You can subscribe in two ways:
     • `/subscribe quantum computing`
     • `/subscribe gravitational waves`
 
-*Testing Your Subscriptions*
-Want to see what kind of papers a subscription will give you? Use the `/test` command:
-• `/test cs.AI`
-• `/test machine learning`
-
 *Managing Subscriptions*
-Go to "My Subscriptions" from the main menu to see all your topics\. You can unsubscribe from any of them with a single click\. You can also use the `/unsubscribe <topic>` command\.
+Go to "My Subscriptions" from the main menu to see all your topics\. You can unsubscribe from any of them with a single click\.
     """
     
     keyboard = [[InlineKeyboardButton("⬅️ Back to Main Menu", callback_data='main_menu')]]
@@ -310,45 +307,6 @@ async def mysubscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
-async def test_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    topic = ' '.join(context.args).strip()
-    
-    if not topic:
-        await update.message.reply_text("Please provide a topic to test\.\nExample: `/test machine learning`", parse_mode=ParseMode.MARKDOWN_V2)
-        return
-    
-    await update.message.reply_text(f"🔍 Searching for recent papers on *{escape_markdown_v2(topic)}*\.\.\.", parse_mode=ParseMode.MARKDOWN_V2)
-    
-    try:
-        articles = search_arxiv(
-            topic, 
-            max_results=Config.MAX_TEST_RESULTS, 
-            days_back=Config.DAYS_BACK_FOR_TEST_SEARCH
-        )
-        
-        if not articles:
-            await update.message.reply_text(
-                f"No recent papers found for *{escape_markdown_v2(topic)}* in the last {Config.DAYS_BACK_FOR_TEST_SEARCH} days\.\n"
-                f"Try a different topic or check if it's a valid arXiv category\.",
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
-            return
-        
-        response = f"📄 *Recent papers for '{escape_markdown_v2(topic)}':*\n\n"
-        for i, article in enumerate(articles, 1):
-            response += format_article_message(article, i)
-            response += "\n" + "─" * 50 + "\n\n"
-        
-        await update.message.reply_text(
-            response, 
-            parse_mode=ParseMode.MARKDOWN_V2, 
-            disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in test search: {e}")
-        await update.message.reply_text("Sorry, there was an error searching for papers\. Please try again later\.", parse_mode=ParseMode.MARKDOWN_V2)
-
 def format_article_message(article, number=None):
     """Format article information into a readable message."""
     title = escape_markdown_v2(article['title'])
@@ -381,7 +339,7 @@ def format_article_message(article, number=None):
     return message
 
 async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Check for new articles and notify subscribed users."""
+    """Check for new articles and notify subscribed users concurrently."""
     logger.info("Checking for new articles...")
     
     subscriptions = get_all_subscriptions()
@@ -391,54 +349,68 @@ async def check_new_articles(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     
     all_topics = set(topic for user_topics in subscriptions.values() for topic in user_topics)
-    logger.info(f"Checking {len(all_topics)} unique topics")
+    if not all_topics:
+        logger.info("No topics to check.")
+        return
+        
+    logger.info(f"Checking {len(all_topics)} unique topics concurrently...")
 
-    # Determine the time window for the search
-    # Add a buffer to avoid missing articles due to timing
     search_window_minutes = Config.CHECK_INTERVAL_MINUTES + Config.SEARCH_BUFFER_MINUTES
     
+    # Create a list of tasks to run concurrently
+    tasks = [
+        asyncio.to_thread(
+            search_arxiv,
+            topic, 
+            max_results=Config.MAX_RESULTS_PER_SEARCH, 
+            minutes_back=search_window_minutes
+        )
+        for topic in all_topics
+    ]
+    
+    # Run all search tasks concurrently
+    list_of_article_lists = await asyncio.gather(*tasks, return_exceptions=True)
+
+    topic_list = list(all_topics)
     newly_notified_articles = set()
     popular_categories = get_popular_categories()
 
-    for topic in all_topics:
-        try:
-            articles = search_arxiv(
-                topic, 
-                max_results=Config.MAX_RESULTS_PER_SEARCH, 
-                minutes_back=search_window_minutes
-            )
-            
-            for article in articles:
-                article_id = article['id']
-                
-                display_topic = escape_markdown_v2(popular_categories.get(topic, topic))
-                message = f"🔔 *New arXiv Paper Alert\!*\n\n"
-                message += f"📍 *Topic:* {display_topic}\n\n"
-                message += format_article_message(article)
+    for i, articles_or_exc in enumerate(list_of_article_lists):
+        topic = topic_list[i]
 
-                for user_id_str, user_topics in subscriptions.items():
-                    user_id = int(user_id_str)
-                    if topic in user_topics:
-                        if not has_been_notified(user_id, article_id):
-                            try:
-                                await context.bot.send_message(
-                                    chat_id=user_id, 
-                                    text=message, 
-                                    parse_mode=ParseMode.MARKDOWN_V2,
-                                    disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
-                                )
-                                logger.info(f"Notification for article {article_id} sent to user {user_id} for topic '{topic}'")
-                                
-                                newly_notified_articles.add(article_id)
-                                add_notified_article(user_id, article_id)
-                                
-                            except Exception as e:
-                                logger.error(f"Failed to send message to {user_id}: {e}")
-                        else:
-                            logger.info(f"Skipping article {article_id} for user {user_id} (already notified)")
-                    
-        except Exception as e:
-            logger.error(f"Error checking topic '{topic}': {e}")
+        if isinstance(articles_or_exc, Exception):
+            logger.error(f"Error checking topic '{topic}': {articles_or_exc}")
+            continue
+
+        articles = articles_or_exc
+        for article in articles:
+            article_id = article['id']
+            
+            display_topic = escape_markdown_v2(popular_categories.get(topic, topic))
+            message = f"🔔 *New arXiv Paper Alert\!*\n\n"
+            message += f"📍 *Topic:* {display_topic}\n\n"
+            message += format_article_message(article)
+
+            for user_id_str, user_topics in subscriptions.items():
+                user_id = int(user_id_str)
+                if topic in user_topics:
+                    if not has_been_notified(user_id, article_id):
+                        try:
+                            await context.bot.send_message(
+                                chat_id=user_id, 
+                                text=message, 
+                                parse_mode=ParseMode.MARKDOWN_V2,
+                                disable_web_page_preview=not Config.ENABLE_WEB_PAGE_PREVIEW
+                            )
+                            logger.info(f"Notification for article {article_id} sent to user {user_id} for topic '{topic}'")
+                            
+                            newly_notified_articles.add(article_id)
+                            add_notified_article(user_id, article_id)
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to send message to {user_id}: {e}")
+                    else:
+                        logger.info(f"Skipping article {article_id} for user {user_id} (already notified)")
 
     if newly_notified_articles:
         logger.info(f"Found and notified users about {len(newly_notified_articles)} new articles.")
@@ -469,7 +441,6 @@ def main() -> None:
     application.add_handler(CommandHandler("unsubscribe", unsubscribe))
     application.add_handler(CommandHandler("mysubscriptions", mysubscriptions))
     application.add_handler(CommandHandler("categories", categories))
-    application.add_handler(CommandHandler("test", test_search))
 
     # Add button handler and menu handler
     application.add_handler(CallbackQueryHandler(button_handler))
